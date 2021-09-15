@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/internal/proto6"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -689,7 +690,61 @@ func (s *server) planResourceChange(ctx context.Context, req *tfprotov6.PlanReso
 		return
 	}
 
-	// first, execute any AttributePlanModifiers
+	// first, execute any attr.TypeWithModifyPlans
+	rawStateVal := map[string]tftypes.Value{}
+	err = state.As(&rawStateVal)
+	if err != nil {
+		// TODO: error
+	}
+	rawPlanVal := map[string]tftypes.Value{}
+	err = plan.As(&rawPlanVal)
+	if err != nil {
+		// TODO: error
+	}
+	for attrName, a := range resourceSchema.Attributes {
+		path := tftypes.NewAttributePath().WithAttributeName(attrName)
+		state, ok := rawStateVal[attrName]
+		if !ok {
+			// TODO: error
+		}
+		plan, ok := rawPlanVal[attrName]
+		if !ok {
+			// TODO: error
+		}
+
+		if a.Type != nil {
+			newPlan, diags := attributeTypeModifyPlan(ctx, a.Type, state, plan, path)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			rawNewPlan, err := attr.ValueToTerraform(ctx, newPlan)
+			if err != nil {
+				// TODO: error
+			}
+			rawPlanVal[attrName] = rawNewPlan
+		} else if a.Attributes != nil {
+			newPlan, diags := attributeTypeModifyPlan(ctx, a.Attributes.AttributeType(), state, plan, path)
+			resp.Diagnostics.Append(diags...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+			rawNewPlan, err := attr.ValueToTerraform(ctx, newPlan)
+			if err != nil {
+				// TODO: error
+			}
+			rawPlanVal[attrName] = rawNewPlan
+		} else {
+			// TODO: error
+		}
+	}
+	err = tftypes.ValidateValue(plan.Type(), rawPlanVal)
+	if err != nil {
+		// TODO: error
+	}
+	plan = tftypes.NewValue(plan.Type(), rawPlanVal)
+
+	// second, execute any AttributePlanModifiers
 	modifySchemaPlanReq := ModifySchemaPlanRequest{
 		Config: Config{
 			Schema: resourceSchema,
@@ -746,7 +801,7 @@ func (s *server) planResourceChange(ctx context.Context, req *tfprotov6.PlanReso
 		return
 	}
 
-	// second, execute any ModifyPlan func
+	// third, execute any ModifyPlan func
 	var modifyPlanResp ModifyResourcePlanResponse
 	if resource, ok := resource.(ResourceWithModifyPlan); ok {
 		modifyPlanReq := ModifyResourcePlanRequest{
