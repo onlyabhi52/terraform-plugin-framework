@@ -691,28 +691,38 @@ func (s *server) planResourceChange(ctx context.Context, req *tfprotov6.PlanReso
 	}
 
 	// first, execute any attr.TypeWithModifyPlans
-	rawStateVal := map[string]tftypes.Value{}
-	err = state.As(&rawStateVal)
-	if err != nil {
-		// TODO: error
-	}
 	rawPlanVal := map[string]tftypes.Value{}
 	err = plan.As(&rawPlanVal)
 	if err != nil {
-		// TODO: error
+		resp.Diagnostics.AddError(
+			"Error parsing plan",
+			"An unexpected error was encountered trying to parse the prior state. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
+		)
+		return
+	}
+	rawStateVal := map[string]tftypes.Value{}
+	if !state.IsNull() {
+		err = state.As(&rawStateVal)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error parsing prior state",
+				"An unexpected error was encountered trying to parse the prior state. This is always an error in the provider. Please report the following to the provider developer:\n\n"+err.Error(),
+			)
+			return
+		}
 	}
 	for attrName, a := range resourceSchema.Attributes {
 		path := tftypes.NewAttributePath().WithAttributeName(attrName)
-		state, ok := rawStateVal[attrName]
-		if !ok {
-			// TODO: error
-		}
 		plan, ok := rawPlanVal[attrName]
 		if !ok {
 			// TODO: error
 		}
 
 		if a.Type != nil {
+			state, ok := rawStateVal[attrName]
+			if !ok {
+				state = tftypes.NewValue(a.Type.TerraformType(ctx), nil)
+			}
 			newPlan, diags := attributeTypeModifyPlan(ctx, a.Type, state, plan, path)
 			resp.Diagnostics.Append(diags...)
 			if resp.Diagnostics.HasError() {
@@ -724,6 +734,10 @@ func (s *server) planResourceChange(ctx context.Context, req *tfprotov6.PlanReso
 			}
 			rawPlanVal[attrName] = rawNewPlan
 		} else if a.Attributes != nil {
+			state, ok := rawStateVal[attrName]
+			if !ok {
+				state = tftypes.NewValue(a.Attributes.AttributeType().TerraformType(ctx), nil)
+			}
 			newPlan, diags := attributeTypeModifyPlan(ctx, a.Attributes.AttributeType(), state, plan, path)
 			resp.Diagnostics.Append(diags...)
 			if resp.Diagnostics.HasError() {
